@@ -1,5 +1,7 @@
 #[macro_use] extern crate rocket;
+
 use rocket::tokio::time::{sleep, Duration};
+use rocket::fs::NamedFile;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
@@ -42,9 +44,15 @@ fn upload() -> String {
     s
 }
 
-#[launch]
-fn rocket() -> _ {
-    rocket::build().mount("/", routes![index, delay, greet, upload])
+#[get("/<file..>")]
+async fn files(file: std::path::PathBuf) -> Option<NamedFile> {
+    NamedFile::open(std::path::Path::new("static/").join(file)).await.ok()
 }
 
+#[launch]
+fn rocket() -> _ {
+    rocket::build()
+        .mount("/", routes![files, index])
+        .mount("/other_routes", routes![index, delay, greet, upload])
+}
 
