@@ -5,11 +5,13 @@ use rocket::fs::NamedFile;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
+use rocket_dyn_templates::{Template, tera::Tera, context};
 
 #[get("/")]
-async fn index() -> Option<NamedFile> {
-    
-    NamedFile::open(std::path::Path::new("static/index.html")).await.ok()
+fn index() -> Template {
+    Template::render("index", context! {
+        title: "Hello"
+    })
 }
 
 #[get("/delay/<seconds>")]
