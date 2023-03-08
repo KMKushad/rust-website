@@ -3,10 +3,13 @@ use rocket::tokio::time::{sleep, Duration};
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
+use rocket_dyn_templates::{Template, tera::Tera, context};
 
 #[get("/")]
-fn index() -> &'static str {
-    "Hello, world!"
+fn index() -> Template {
+    Template::render("index", context! {
+        title: "Hello"
+    })
 }
 
 #[get("/delay/<seconds>")]
