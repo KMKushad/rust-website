@@ -10,7 +10,9 @@
     {% block content %}{% endblock content %}
 
     <footer>
-      <a href="/">Home</a>
+      <a href="/">Home</a> 
+      <a href="/login">Log In</a>
+      <a href="/message">Messages</a>
     </footer>
   </body>
 </html>

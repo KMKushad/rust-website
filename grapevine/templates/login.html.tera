@@ -1,0 +1,9 @@
+{% extends "base" %}
+
+{% block content %}
+<form action="/profile" method="post">
+    <input type="text" id="username" name="username" placeholder="Username"> <br>
+    <input type="text" id="password" name="password" placeholder="Password"> <br>
+    <button class="btn btn-primary" type="submit">Log In</button>
+</form>
+{% endblock content %}

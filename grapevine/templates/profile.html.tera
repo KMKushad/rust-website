@@ -3,6 +3,6 @@
 {% block content %}
     <p class="info">
         {{ username }} <br>
-        {{ email}}
+        {{ password }}
     </p>
 {% endblock content %}

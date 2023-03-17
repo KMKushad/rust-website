@@ -1,0 +1,17 @@
+{% extends "base" %}
+
+{% block content %}
+    {% if messages %}
+        {% for message in messages %}
+            <p>{{ message["time_created"] }} {{ message["content"] }}</p>
+        {% endfor %}
+    {% else %}
+        <p>No message yet.</p>
+    {% endif %}
+
+    <form action="/message" method="post" accept-charset="utf-8">
+        <textarea placeholder="Your message here..."
+            name="message" rows="10" cols="50"></textarea>
+        <p><input type="submit" value="Submit Message"></p>
+    </form>
+{% endblock content %}
