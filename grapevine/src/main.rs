@@ -7,7 +7,7 @@ use rocket::http::{Cookie, CookieJar};
 use rocket_dyn_templates::{Template, context};
 use either::*;
 use serde::{Deserialize, Serialize};
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection};
 type Session<'a> = rocket_session::Session<'a, User>;
 
 #[derive(Debug, FromForm)]
@@ -16,7 +16,7 @@ struct AccountInfo {
     password: String,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 struct User {
     id: i32,
     username: String,
@@ -35,11 +35,11 @@ struct Message {
 struct ID(i32);
 
 #[get("/profile")]
-fn get_profile(cookies: &CookieJar<'_>) -> Either<Redirect, Template> {
+fn profile(cookies: &CookieJar<'_>) -> Either<Redirect, Template> {
     let id = cookies.get("user_id");
     let name = cookies.get("username");
 
-    if id.is_some(){
+    if id.is_some() {
         Right(
             Template::render("profile", context! {
                 username: name.map(|c| c.value()),
@@ -60,11 +60,33 @@ fn index() -> Template {
     })
 }
 
-#[post("/profile", data = "<credentials>")]
-fn profile(cookies: &CookieJar<'_>, credentials: Form<AccountInfo>) -> Option<Redirect> {
+#[post("/register", data = "<credentials>")]
+fn create_new_account(cookies: &CookieJar<'_>, credentials: Form<AccountInfo>) -> Option<Either<Redirect, Template>> {
     println!("{:#?}", &credentials);
 
     let conn = Connection::open("forum.sqlite").ok()?;
+
+    let mut stmt = conn.prepare("SELECT * FROM users WHERE username = ?1").ok()?;
+    let rows = stmt.query_map([&credentials.username], |row| {
+        Ok(User {
+            id: row.get(0)?,
+            username: row.get(1)?,
+            password: row.get(2)?,
+            time_created: row.get(3)?,
+        })
+    }).ok()?;
+    
+    let mut users: Vec<User> = Vec::new();
+
+    for user in rows {
+            users.push(user.ok()?);
+    }
+
+    if !(users.len() == 0) {
+        return Some(Right(Template::render("hello", context! {
+            title: "Username already taken"
+        })))
+    }
 
     conn.execute(
         "INSERT INTO users (username, password) values (?1, ?2)",
@@ -88,12 +110,77 @@ fn profile(cookies: &CookieJar<'_>, credentials: Form<AccountInfo>) -> Option<Re
     cookies.add(Cookie::new("user_id", ids[0].0.to_string()));
     cookies.add(Cookie::new("username", credentials.username.clone()));
 
-    Some(Redirect::to("profile"))
+    Some(Left(Redirect::to("profile")))
 }   
 
+#[get("/register")]
+fn render_register(cookies: &CookieJar<'_>) -> Either<Template, Redirect> {
+    let id = cookies.get("user_id");
+
+    if !id.is_some() {
+        Left(Template::render("register", context! {}))
+    }
+
+    else {
+        Right(Redirect::to("profile"))
+    }
+}
+
 #[get("/login")]
-fn login() -> Template {
-    Template::render("login", context! {})
+fn render_login(cookies: &CookieJar<'_>) -> Either<Template, Redirect> {
+    let id = cookies.get("user_id");
+
+    if !id.is_some() {
+        Left(Template::render("login", context! {}))
+    }
+
+    else {
+        Right(Redirect::to("profile"))
+    }
+}
+
+#[post("/login", data = "<credentials>")]
+fn login(cookies: &CookieJar<'_>, credentials: Form<AccountInfo>) -> Option<Either<Redirect, Template>> {
+    let conn = Connection::open("forum.sqlite").ok()?;
+
+    let mut stmt = conn.prepare("SELECT * FROM users WHERE username = ?1 AND password = ?2").ok()?;
+    let rows = stmt.query_map([&credentials.username, &credentials.password], |row| {
+        Ok(User {
+            id: row.get(0)?,
+            username: row.get(1)?,
+            password: row.get(2)?,
+            time_created: row.get(3)?,
+        })
+    }).ok()?;
+
+    let mut users: Vec<User> = Vec::new();
+
+    for user in rows {
+            users.push(user.ok()?);
+    }
+
+    if !(users.len() == 1) {
+        return Some(Right(Template::render("hello", context! {
+            title: "Invalid account"
+        })))
+    }
+
+    else {
+        cookies.add(Cookie::new("user_id", users[0].id.to_string()));
+        cookies.add(Cookie::new("username", users[0].username.clone()));
+    }
+
+    Some(Left(Redirect::to("profile")))
+}
+
+#[get("/logout")]
+fn logout(cookies: &CookieJar<'_>) -> Template {
+    cookies.remove(Cookie::named("user_id"));
+    cookies.remove(Cookie::named("username"));
+
+    Template::render("hello", context!{
+        title: "Successfully logged out."
+    })
 }
 
 #[post("/message", data = "<message>")]
@@ -141,6 +228,6 @@ fn rocket() -> _ {
         .attach(Template::fairing())
         .attach(Session::fairing())
         .mount("/static", FileServer::from(relative!("static")))
-        .mount("/", routes![index, profile, login, get_profile, submit, messages])
+        .mount("/", routes![index, render_login, render_register, login, profile, submit, messages, logout, create_new_account])
 }
 

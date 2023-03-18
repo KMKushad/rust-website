@@ -11,8 +11,11 @@
 
     <footer>
       <a href="/">Home</a> 
-      <a href="/login">Log In</a>
+      <a href="/register">Register</a>
       <a href="/message">Messages</a>
+      <a href="/logout">Logout</a>
+      <a href="/profile">Profile</a>
+      <a href="/login">Log In</a>
     </footer>
   </body>
 </html>
