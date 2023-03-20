@@ -27,7 +27,9 @@ struct User {
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 struct Message {
     id: i32,
+    title: String,
     content: String,
+    username: String,
     time_created: String,
 }
 
@@ -36,11 +38,11 @@ struct ID(i32);
 
 #[get("/profile")]
 fn profile(cookies: &CookieJar<'_>) -> Either<Redirect, Template> {
-    let id = cookies.get("user_id");
-    let name = cookies.get("username");
+    if logged_in(cookies) {
+        let id = cookies.get("user_id");
+        let name = cookies.get("username");
 
-    if id.is_some() {
-        Right(
+        Right (
             Template::render("profile", context! {
                 username: name.map(|c| c.value()),
                 password: id.map(|c| c.value()),
@@ -115,9 +117,7 @@ fn create_new_account(cookies: &CookieJar<'_>, credentials: Form<AccountInfo>) -
 
 #[get("/register")]
 fn render_register(cookies: &CookieJar<'_>) -> Either<Template, Redirect> {
-    let id = cookies.get("user_id");
-
-    if !id.is_some() {
+    if !logged_in(cookies) {
         Left(Template::render("register", context! {}))
     }
 
@@ -128,9 +128,7 @@ fn render_register(cookies: &CookieJar<'_>) -> Either<Template, Redirect> {
 
 #[get("/login")]
 fn render_login(cookies: &CookieJar<'_>) -> Either<Template, Redirect> {
-    let id = cookies.get("user_id");
-
-    if !id.is_some() {
+    if !logged_in(cookies) {
         Left(Template::render("login", context! {}))
     }
 
@@ -184,27 +182,66 @@ fn logout(cookies: &CookieJar<'_>) -> Template {
 }
 
 #[post("/message", data = "<message>")]
-fn submit(message: Form<&str>) -> Option<Redirect> {
+fn submit(cookies: &CookieJar<'_>, message: Form<&str>) -> Option<Redirect> {
+    let name = cookies.get("username");
     let conn = Connection::open("forum.sqlite").ok()?;
 
+    println!("{}", message.to_string());
+
     conn.execute(
-        "INSERT INTO messages (content) values (?1)",
-        [message.to_string()]
+        "INSERT INTO messages (content, title, username) values (?1, ?2, ?3)",
+        [message.to_string(), "test title".to_string(), name?.value().to_string()]
     ).ok()?;
+
+    println!("Message sent");
 
     Some(Redirect::to("message"))
 }
 
 #[get("/message")]
-fn messages() -> Option<Template> {
+fn messages(cookies: &CookieJar<'_>) -> Option<Template> {
+    if logged_in(cookies) {
+        let conn = Connection::open("forum.sqlite").ok()?;
+
+        let mut stmt = conn.prepare("SELECT * FROM messages").ok()?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Message {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                content: row.get(2)?,
+                username: row.get(3)?,
+                time_created: row.get(4)?,
+            })
+        }).ok()?;
+    
+        let mut messages: Vec<Message> = Vec::new();
+    
+        for message in rows {
+            messages.push(message.ok()?);
+        }
+    
+        Some(Template::render("message_list", context! {
+            messages: messages,
+        }))
+    }
+
+    else {
+        Some(Template::render("login", context! {}))
+    }
+}
+
+#[get("/<message_id>")]
+fn render_message(message_id: i32) -> Option<Template>{
     let conn = Connection::open("forum.sqlite").ok()?;
 
-    let mut stmt = conn.prepare("SELECT id, content, time_posted FROM messages").ok()?;
-    let rows = stmt.query_map([], |row| {
+    let mut stmt = conn.prepare("SELECT * FROM messages WHERE id = ?1").ok()?;
+    let rows = stmt.query_map([message_id], |row| {
         Ok(Message {
             id: row.get(0)?,
-            content: row.get(1)?,
-            time_created: row.get(2)?,
+            title: row.get(1)?,
+            content: row.get(2)?,
+            username: row.get(3)?,
+            time_created: row.get(4)?,
         })
     }).ok()?;
 
@@ -214,13 +251,22 @@ fn messages() -> Option<Template> {
         messages.push(message.ok()?);
     }
 
-    println!("{:?}", messages);
-
     Some(Template::render("message", context! {
         messages: messages,
     }))
 }
 
+fn logged_in(cookies: &CookieJar<'_>) -> bool {
+    let id = cookies.get("user_id");
+
+    if !id.is_some() {
+        false
+    }
+
+    else {
+        true
+    }
+}
 
 #[launch]
 fn rocket() -> _ {
@@ -229,5 +275,6 @@ fn rocket() -> _ {
         .attach(Session::fairing())
         .mount("/static", FileServer::from(relative!("static")))
         .mount("/", routes![index, render_login, render_register, login, profile, submit, messages, logout, create_new_account])
+        .mount("/message", routes![render_message])
 }
 
