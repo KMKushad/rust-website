@@ -1,17 +1,23 @@
 {% extends "base" %}
 
 {% block content %}
-    {% if messages %}
-        {% for message in messages %}
-            <p>{{ message["username"] }} says at {{ message["time_created"] }} "{{ message["content"] }}"</p>
-        {% endfor %}
+    {% if message %}
+        <p>{{ message["username"] }} says at {{ message["time_created"] }} "{{ message["content"] }}"</p>
     {% else %}
         <p>No message yet.</p>
     {% endif %}
 
-    <form action="/message" method="post" accept-charset="utf-8">
-        <textarea placeholder="Your message here..."
-            name="message" rows="10" cols="50"></textarea>
-        <p><input type="submit" value="Submit Message"></p>
+    {% if replies %}
+        {% for reply in replies %}
+            <p>{{ reply["username"] }} replies at {{ reply["time_created"] }} "{{ reply["content"] }}" under thread id {{ reply["parent"] }} with id {{ reply["id"] }}</p>
+        {% endfor %}
+    {% else %}
+        <p>No replies yet.</p>
+    {% endif %}
+
+    <form action="/{{ message['id'] }}/reply" method="post" accept-charset="utf-8">
+        <textarea placeholder="Your reply here..."
+            name="reply" rows="10" cols="50"></textarea>
+        <p><input type="submit" value="Submit Message"></p> 
     </form>
 {% endblock content %}
