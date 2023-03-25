@@ -43,6 +43,12 @@ struct AccountInfo {
     password: String,
 }
 
+#[derive(Debug, FromForm)]
+struct DirectMessage {
+    receiver: String,
+    content: String,
+}
+
 //A struct to represent a user object, same as the database columns.
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 struct User {
@@ -73,6 +79,17 @@ struct Reply {
     id: i32,
     content: String,
     username: String,
+    time_created: String,
+}
+
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+struct Conversation {
+    id: i32,
+    sender: String,
+    receiver: String, 
+    content: String,
+    reference: Option<i32>,
+    conversation_id: i32,
     time_created: String,
 }
 
@@ -388,6 +405,63 @@ fn reply(cookies: &CookieJar<'_>, message_id: i32, content: Form<&str>) -> Optio
     Some(Redirect::to(format!("/message/{}", message_id.to_string())))
 }
 
+
+#[get("/conversations")]
+fn render_conversations(cookies: &CookieJar<'_>) -> Option<Template>{
+    if logged_in(cookies) {
+        let name = cookies.get("username")?.value().to_string();
+        let conn = Connection::open("forum.sqlite").ok()?;
+
+        let mut stmt = conn.prepare("SELECT * FROM direct_messages WHERE sender = ?1 OR receiver = ?1").ok()?;
+        let rows = stmt.query_map([name], |row| {
+            Ok(Conversation {
+                id: row.get(0)?,
+                sender: row.get(1)?,
+                receiver: row.get(2)?,
+                content: row.get(3)?,
+                reference: row.get(4)?,
+                conversation_id: row.get(5)?,
+                time_created: row.get(6)?,
+            })
+        }).ok()?;
+
+        println!("select happened");
+    
+        let mut direct_messages: Vec<Conversation> = Vec::new();
+        
+        println!("dms gotten adsada");
+
+        for dm in rows {
+            direct_messages.push(dm.ok()?);
+        }
+    
+        Some(Template::render("conversation_list", context! {
+            messages: direct_messages,
+        }))
+    }
+
+    else {
+        Some(Template::render("login", context! {}))
+    }
+}
+
+#[post("/conversations", data = "<message>")]
+fn direct_message(cookies: &CookieJar<'_>, message: Form<DirectMessage>) -> Option<Redirect> {
+    let name = cookies.get("username");
+    let conn = Connection::open("forum.sqlite").ok()?;
+
+    println!("{}", &message.receiver.to_string());
+
+    conn.execute(
+        "INSERT INTO direct_messages (sender, receiver, content, conversation_id) values (?1, ?2, ?3, ?4)",
+        [name?.value().to_string(), message.receiver.to_string(), message.content.to_string(), 1.to_string()]
+    ).ok()?;
+
+    println!("Message sent");
+
+    Some(Redirect::to("conversations"))
+}
+
 /* 
 This function tests whether the user is logged in. 
 
@@ -413,7 +487,7 @@ fn rocket() -> _ {
     rocket::build()
         .attach(Template::fairing())
         .mount("/static", FileServer::from(relative!("static")))
-        .mount("/", routes![index, render_login, render_register, login, profile, submit, messages, logout, create_new_account, reply])
+        .mount("/", routes![index, render_login, render_register, login, profile, submit, messages, logout, create_new_account, reply, render_conversations, direct_message])
         .mount("/message", routes![render_message])
 }
 

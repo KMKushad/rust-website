@@ -3,15 +3,17 @@
 {% block content %}
     {% if messages %}
         {% for message in messages %}
-            <a href="/message/{{ message['id'] }}">{{ message["title"] }} by {{ message["username"] }}<a> </br>
+            to {{ message["receiver"] }}, {{ message["content"] }} by {{ message["sender"] }} <br>
         {% endfor %}
     {% else %}
         <p>No message yet.</p>
     {% endif %}
 
-    <form action="/conversation" method="post" accept-charset="utf-8">
+    <form action="/conversations" method="post" accept-charset="utf-8"> 
+        <input type="text" name="receiver"><br>
+        
         <textarea placeholder="Your message here..."
-            name="message" rows="10" cols="50"></textarea>
+            name="content" rows="10" cols="50"></textarea>
         <p><input type="submit" value="Submit Message"></p>
     </form>
 {% endblock content %}
