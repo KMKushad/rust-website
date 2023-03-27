@@ -126,7 +126,11 @@ fn profile(cookies: &CookieJar<'_>) -> Either<Redirect, Template> {
 Generic home page.
 */
 #[get("/")]
-fn index() -> Template {
+fn index(cookies: &CookieJar<'_>) -> Template {
+    let id = retrieve_conversation_id(cookies, String::from("kmk2023"));
+
+    println!("{:?}", id);
+
     Template::render("hello", context! {
         title: String::from("Hello")
     })
@@ -424,12 +428,8 @@ fn render_conversations(cookies: &CookieJar<'_>) -> Option<Template>{
                 time_created: row.get(6)?,
             })
         }).ok()?;
-
-        println!("select happened");
     
         let mut direct_messages: Vec<Conversation> = Vec::new();
-        
-        println!("dms gotten adsada");
 
         for dm in rows {
             direct_messages.push(dm.ok()?);
@@ -476,6 +476,56 @@ fn logged_in(cookies: &CookieJar<'_>) -> bool {
 
     else {
         true
+    }
+}
+
+fn retrieve_conversation_id(cookies: &CookieJar<'_>, target: String) -> Option<i32> {
+    let name = cookies.get("username")?.value();
+    let conn = Connection::open("forum.sqlite").ok()?;
+
+    let mut stmt = conn.prepare("SELECT id FROM conversation_members WHERE user = ?1").ok()?;
+    let rows = stmt.query([&name]).ok()?;
+
+    let mut conversation_ids: Vec<ID> = Vec::new();
+    let found_conversation: bool = false;
+    let found_id: i32 = 0;
+
+    for id in rows {
+        let mut duplicate_checker = conn.prepare("SELECT user FROM conversation_members WHERE id = ?1").ok()?;
+        let user_rows = duplicate_checker.query_map([id.ok()], |row| {
+            Ok(row.get(0).ok()?)
+        }).ok()?;
+
+        for user in user_rows {
+            if user.ok().to_string() == target {
+                found_conversation = true;
+                found_id = id.ok();
+                break;
+            }
+        }
+    }
+
+    if found_conversation {
+        Some(found_id)
+    }
+
+    else {
+        let mut new_id_generator = conn.prepare("SELECT max(id) FROM conversation_members").ok()?;
+        let curr_max = new_id_generator.query([]).ok()?;
+
+        let id: i32 = curr_max;
+
+        conn.execute(
+            "INSERT INTO conversation_members VALUES (?1, ?2)",
+            [id.to_string(), target.to_string()]
+        ).ok()?;
+
+        conn.execute(
+            "INSERT INTO conversation_members VALUES (?1, ?2)",
+            [id.to_string(), name.to_string()]
+        ).ok()?;
+
+        Some(id)
     }
 }
 
