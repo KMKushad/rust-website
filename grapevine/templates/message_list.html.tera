@@ -9,7 +9,7 @@
         <p>No message yet.</p>
     {% endif %}
 
-    <form action="/conversation" method="post" accept-charset="utf-8">
+    <form action="/message" method="post" accept-charset="utf-8">
         <textarea placeholder="Your message here..."
             name="message" rows="10" cols="50"></textarea>
         <p><input type="submit" value="Submit Message"></p>

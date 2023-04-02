@@ -97,7 +97,6 @@ struct Conversation {
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 struct ID(i32);
 
-
 /*
 When a get request is made to /profile, this first checks if the user is logged in.
 
@@ -126,11 +125,7 @@ fn profile(cookies: &CookieJar<'_>) -> Either<Redirect, Template> {
 Generic home page.
 */
 #[get("/")]
-fn index(cookies: &CookieJar<'_>) -> Template {
-    let id = retrieve_conversation_id(cookies, String::from("kmk2023"));
-
-    println!("{:?}", id);
-
+fn index() -> Template {
     Template::render("hello", context! {
         title: String::from("Hello")
     })
@@ -188,8 +183,6 @@ fn create_new_account(cookies: &CookieJar<'_>, credentials: Form<AccountInfo>) -
     for x in rows {
         ids.push(x.ok()?);
     }
-
-    println!("{:?}", ids[0].0);
 
     cookies.add(Cookie::new("user_id", ids[0].0.to_string()));
     cookies.add(Cookie::new("username", credentials.username.clone()));
@@ -396,7 +389,7 @@ The reply has a parent id, content, and the user who made it.
 
 The parent id is the message that it's replying to, the content is the submitted message, and the username is the logged in user.
 */
-#[post("/<message_id>/reply", data = "<content>")]
+#[post("/<message_id>/reply", data = "<content>", rank = 2)]
 fn reply(cookies: &CookieJar<'_>, message_id: i32, content: Form<&str>) -> Option<Redirect>{
     let conn = Connection::open("forum.sqlite").ok()?;
     let username = cookies.get("username");
@@ -410,14 +403,14 @@ fn reply(cookies: &CookieJar<'_>, message_id: i32, content: Form<&str>) -> Optio
 }
 
 
-#[get("/conversations")]
-fn render_conversations(cookies: &CookieJar<'_>) -> Option<Template>{
+#[get("/conversations/<target>")]
+fn render_conversation(cookies: &CookieJar<'_>, target: String) -> Option<Template>{
     if logged_in(cookies) {
         let name = cookies.get("username")?.value().to_string();
         let conn = Connection::open("forum.sqlite").ok()?;
 
-        let mut stmt = conn.prepare("SELECT * FROM direct_messages WHERE sender = ?1 OR receiver = ?1").ok()?;
-        let rows = stmt.query_map([name], |row| {
+        let mut stmt = conn.prepare("SELECT * FROM direct_messages WHERE (sender = ?1 AND receiver = ?2) OR (receiver = ?1 AND sender = ?2)").ok()?;
+        let rows = stmt.query_map([name, target.clone()], |row| {
             Ok(Conversation {
                 id: row.get(0)?,
                 sender: row.get(1)?,
@@ -435,8 +428,9 @@ fn render_conversations(cookies: &CookieJar<'_>) -> Option<Template>{
             direct_messages.push(dm.ok()?);
         }
     
-        Some(Template::render("conversation_list", context! {
+        Some(Template::render("conversation", context! {
             messages: direct_messages,
+            target: target,
         }))
     }
 
@@ -446,20 +440,61 @@ fn render_conversations(cookies: &CookieJar<'_>) -> Option<Template>{
 }
 
 #[post("/conversations", data = "<message>")]
-fn direct_message(cookies: &CookieJar<'_>, message: Form<DirectMessage>) -> Option<Redirect> {
+fn new_direct_message(cookies: &CookieJar<'_>, message: Form<DirectMessage>) -> Option<Redirect> {
     let name = cookies.get("username");
     let conn = Connection::open("forum.sqlite").ok()?;
-
-    println!("{}", &message.receiver.to_string());
+    
+    let id = retrieve_conversation_id(&cookies, &message.receiver.to_string())?;
 
     conn.execute(
         "INSERT INTO direct_messages (sender, receiver, content, conversation_id) values (?1, ?2, ?3, ?4)",
-        [name?.value().to_string(), message.receiver.to_string(), message.content.to_string(), 1.to_string()]
+        [&name?.value().to_string(), &message.receiver.to_string(), &message.content.to_string(), &id.to_string()]
     ).ok()?;
 
-    println!("Message sent");
-
     Some(Redirect::to("conversations"))
+}
+
+#[post("/conversations/<target>", data = "<message>", rank = 1)]
+fn direct_message(cookies: &CookieJar<'_>, message: Form<String>, target: String) -> Option<Redirect> {
+    let name = cookies.get("username");
+    let conn = Connection::open("forum.sqlite").ok()?;
+
+    let id = retrieve_conversation_id(&cookies, &target)?;
+
+    conn.execute(
+        "INSERT INTO direct_messages (sender, receiver, content, conversation_id) values (?1, ?2, ?3, ?4)",
+        [&name?.value().to_string(), &target, &message.to_string(), &id.to_string()]
+    ).ok()?;
+
+    Some(Redirect::to(format!("/conversations/{}", target)))
+}
+
+#[get("/conversations")]
+fn render_conversation_list(cookies: &CookieJar<'_>) -> Option<Template> {
+    let name = cookies.get("username");
+    let conn = Connection::open("forum.sqlite").ok()?;
+
+    let mut stmt = conn.prepare("SELECT id FROM conversation_members WHERE user = ?1").ok()?;
+    let rows = stmt.query_map([name?.value()], |row| {
+        Ok(ID(row.get("id")?))
+    }).ok()?;
+
+    let mut conversation_partners: Vec<String> = Vec::new();
+
+    for row in rows {
+        let mut stmt = conn.prepare("SELECT user FROM conversation_members WHERE id = ?1 AND user != ?2").ok()?;
+        let partners = stmt.query_map([&row.ok()?.0.to_string(), name?.value()], |row| {
+            Ok(row.get("user")?)
+        }).ok()?;
+
+        for i in partners {
+            conversation_partners.push(i.ok()?);
+        }
+    }
+
+    Some(Template::render("conversation_list", context! {
+        users: conversation_partners,
+    }))
 }
 
 /* 
@@ -479,53 +514,80 @@ fn logged_in(cookies: &CookieJar<'_>) -> bool {
     }
 }
 
-fn retrieve_conversation_id(cookies: &CookieJar<'_>, target: String) -> Option<i32> {
-    let name = cookies.get("username")?.value();
+fn retrieve_conversation_id(cookies: &CookieJar<'_>, target: &String) -> Option<i32> {
+    let name = cookies.get("username");
     let conn = Connection::open("forum.sqlite").ok()?;
 
+    let mut found_id: i32 = 0;
+
     let mut stmt = conn.prepare("SELECT id FROM conversation_members WHERE user = ?1").ok()?;
-    let rows = stmt.query([&name]).ok()?;
+    let rows = stmt.query_map([name?.value()], |row| {
+        Ok(ID(row.get("id")?))
+    }).ok()?;
 
-    let mut conversation_ids: Vec<ID> = Vec::new();
-    let found_conversation: bool = false;
-    let found_id: i32 = 0;
+    let mut logged_in_ids: Vec<ID> = Vec::new();
 
-    for id in rows {
-        let mut duplicate_checker = conn.prepare("SELECT user FROM conversation_members WHERE id = ?1").ok()?;
-        let user_rows = duplicate_checker.query_map([id.ok()], |row| {
-            Ok(row.get(0).ok()?)
-        }).ok()?;
+    for x in rows {
+       logged_in_ids.push(x.ok()?);
+    }
 
-        for user in user_rows {
-            if user.ok().to_string() == target {
-                found_conversation = true;
-                found_id = id.ok();
-                break;
+    let mut stmt = conn.prepare("SELECT id FROM conversation_members WHERE user = ?1").ok()?;
+    let rows = stmt.query_map([target], |row| {
+        Ok(ID(row.get("id")?))
+    }).ok()?;
+
+    let mut target_ids: Vec<ID> = Vec::new();
+
+    for x in rows {
+       target_ids.push(x.ok()?);
+    }
+
+    for i in logged_in_ids {
+        for j in &target_ids {
+            if i.0 == j.0 {
+                found_id = i.0;
             }
         }
     }
 
-    if found_conversation {
-        Some(found_id)
+    if found_id != 0 {
+        return Some(found_id);
     }
 
     else {
-        let mut new_id_generator = conn.prepare("SELECT max(id) FROM conversation_members").ok()?;
-        let curr_max = new_id_generator.query([]).ok()?;
+        let mut stmt = conn.prepare("SELECT MAX(id) FROM conversation_members").ok()?;
 
-        let id: i32 = curr_max;
-
+        let rows = stmt.query_map([], |row| {
+            Ok(ID(row.get(0)?))
+        }).ok()?;
+        
+        let mut temp: Vec<ID> = Vec::new();
+        
+        for x in rows {
+            temp.push(x.ok()?);
+        }
+        
+        let mut max_id: i32;
+    
+        if temp.is_empty() {
+            max_id = 1
+        }
+    
+        else {
+            max_id = temp[0].0 + 1;
+        }
+        
         conn.execute(
-            "INSERT INTO conversation_members VALUES (?1, ?2)",
-            [id.to_string(), target.to_string()]
+            "INSERT INTO conversation_members (id, user) values (?1, ?2)",
+            [max_id.to_string(), name?.value().to_string()]
+        ).ok()?;
+        
+        conn.execute(
+            "INSERT INTO conversation_members (id, user) values (?1, ?2)",
+            [max_id.to_string(), target.to_string()]
         ).ok()?;
 
-        conn.execute(
-            "INSERT INTO conversation_members VALUES (?1, ?2)",
-            [id.to_string(), name.to_string()]
-        ).ok()?;
-
-        Some(id)
+        Some(max_id)
     }
 }
 
@@ -537,7 +599,7 @@ fn rocket() -> _ {
     rocket::build()
         .attach(Template::fairing())
         .mount("/static", FileServer::from(relative!("static")))
-        .mount("/", routes![index, render_login, render_register, login, profile, submit, messages, logout, create_new_account, reply, render_conversations, direct_message])
+        .mount("/", routes![index, render_login, render_register, login, profile, submit, messages, logout, create_new_account, reply, render_conversation, direct_message, new_direct_message, render_conversation_list])
         .mount("/message", routes![render_message])
 }
 
